@@ -1,93 +1,38 @@
-<pre>
+// Firestore security rules for Ahmed ⇄ Xeo chat app
+//
+// This policy restricts all database access to just two user UIDs.
+// Before publishing these rules, replace UID_OF_AHMED and UID_OF_XEO
+// with the actual UIDs of the two accounts you created in Firebase
+// Authentication.  You can find these in the Firebase Console under
+// Authentication → Users.
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper function: returns true only if the request comes from an
+    // authenticated user whose UID is in our allowed list.
+    function isAllowed() {
+      return request.auth != null && (
+        request.auth.uid in [
+          "JP6UGphb5nTXTPhfczyzAi6zf542", // ← replace with Ahmed’s real UID
+          "M76IECUlLJRcqz7GQsrfAnkaGUJ3"    // ← replace with Xeo’s real UID
+        ]
+      );
+    }
+
+    // Allow these two users to read and write any document under
+    // the rooms collection.  If you want to restrict to a single
+    // room ID, change the wildcard {roomId} to the specific room name.
+    match /rooms/{roomId} {
+      allow read, write: if isAllowed();
+
+      // Nested match for messages within a room.  This could be
+      // omitted, as it inherits the allow statement above, but is
+      // included for clarity.
+      match /messages/{msgId} {
+        allow read, create, update, delete: if isAllowed();
+      }
+    }
+  }
 }
-
-
-match /rooms/{roomId} {
-allow read: if isAllowed();
-allow write: if isAllowed();
-
-
-match /messages/{msgId} {
-allow read, create, update, delete: if isAllowed();
-}
-}
-}
-}
-</pre>
-
-
-<!--
-────────────────────────────────────────────────────────
-FILE: README.md (setup)
-────────────────────────────────────────────────────────
--->
-<pre>
-# Ahmed ⇄ Xeo — Private Chat (GitHub Pages + Firebase)
-
-
-A minimal two‑person chat with end‑to‑end encryption (shared passphrase), synced via Firebase, and fully hostable on GitHub Pages.
-
-
-## What you get
-- Static web app (HTML/CSS/JS) — easy to host on GitHub Pages
-- Firebase Auth (email/password) — restricted to two users only (via security rules)
-- Firestore realtime messages
-- End‑to‑end encryption using Web Crypto + shared passphrase
-
-
-## 1) Create a Firebase project
-1. Go to https://console.firebase.google.com and create a project.
-2. Add a Web App to get your config; copy keys into `firebase-config.js`.
-3. Enable **Authentication** > Sign‑in method > **Email/Password**.
-4. Create **two accounts** (Ahmed + Xeo). After creation, copy each user’s **UID**.
-5. Enable **Firestore** in production mode.
-
-
-## 2) Apply Firestore security rules
-Open Firestore > Rules and paste the contents of `firestore.rules`.
-- Replace `UID_OF_AHMED` and `UID_OF_XEO` with real UIDs.
-- Publish the rules.
-
-
-## 3) Prepare repo for GitHub Pages
-1. Create a new GitHub repository, e.g. `ahmed-xeo-chat`.
-2. Add files: `index.html`, `styles.css`, `app.js`, `firebase-config.js`.
-3. Commit and push.
-4. In your repo: Settings > Pages > Build and deployment:
-- Source: **Deploy from a branch**
-- Branch: `main` (root)
-5. Your site will be at `https://<your-user>.github.io/<repo>/`.
-
-
-## 4) First run
-- Visit your Pages URL.
-- Sign in with one of the two emails/passwords.
-- Enter your **display name** (Ahmed or Xeo) and agree on a **room passphrase** (same on both ends).
-- Share the page URL with `?room=ahmed-xeo` (or any name you prefer).
-- Click **Copy invite link** to copy the exact URL including the room.
-
-
-## 5) End‑to‑end encryption notes
-- The passphrase never leaves your browser; it derives an AES‑GCM key using PBKDF2 with room‑specific salt.
-- Firestore only stores IV + ciphertext; without the passphrase the text is unreadable.
-- Change the passphrase anytime; old messages remain decryptable only with the old passphrase.
-
-
-## 6) Optional hardening
-- In Firebase Auth, turn off new user signups by removing/ignoring sign‑up UI; keep only **Sign in**.
-- In rules, keep the allow‑list UIDs exact. Consider also locking to a specific `roomId` path if desired.
-- Set up **App Check** for additional abuse protection.
-
-
-## 7) Troubleshooting
-- If messages show “Decryption failed”, confirm both parties typed the same passphrase and room name.
-- If sign‑in fails, verify the email/password exists in Firebase Auth (no sign‑up from the app).
-- If the site won’t load on GitHub Pages, check file paths are relative, and Pages is enabled.
-
-
-## 8) Traditional backup/export (manual)
-- In Firestore, you can export the `rooms/ahmed-xeo/messages` collection via Firestore export or by writing a simple script.
-- Remember: exports contain only ciphertext.
-
-
-</pre>
