@@ -4,8 +4,8 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Ahmed ⇄ Xeo — Private Chat</title>
-  <link rel="stylesheet" href="styles.css" />
-  <meta name="color-scheme" content="light dark">
+  <link rel="stylesheet" href="./styles.css" />
+  <meta name="color-scheme" content="light dark" />
 </head>
 <body>
   <div id="app">
@@ -15,10 +15,10 @@
     </header>
 
     <main class="shell">
-      <!-- Sign-in -->
+      <!-- Sign‑in panel -->
       <section id="authPanel" class="panel">
         <h1>Sign in</h1>
-        <p class="muted">Only two accounts are allowed. Use your email + password.</p>
+        <p class="muted">Only two accounts are allowed. Use your email &amp; password.</p>
         <form id="authForm" autocomplete="on">
           <label>Email
             <input type="email" id="email" required placeholder="you@example.com" />
@@ -36,16 +36,14 @@
         </form>
       </section>
 
-      <!-- Chat -->
+      <!-- Chat panel -->
       <section id="chatPanel" class="panel" hidden>
         <div class="roomHead">
           <div>
             <div class="roomTitle">Private Room</div>
             <div class="roomSub" id="whoami"></div>
           </div>
-          <div class="roomActions">
-            <button id="copyInvite" class="ghost">Copy invite link</button>
-          </div>
+          <button id="copyInvite" class="ghost">Copy invite link</button>
         </div>
         <div id="messages" class="messages" aria-live="polite"></div>
         <form id="composer" class="composer" autocomplete="off">
@@ -60,55 +58,62 @@
     </footer>
   </div>
 
-  <!-- App wiring (Firebase CDN + your local files) -->
+  <!-- App logic (Firebase & crypto) -->
   <script type="module">
-    // Firebase (CDN v9 Modular)
-  import { initializeApp } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-app.js";
-  import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut, updateProfile } 
-    from "https://www.gstatic.com/firebasejs/9.23.0/firebase-auth.js";
-  import { getFirestore, collection, addDoc, onSnapshot, query, orderBy, serverTimestamp } 
-    from "https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore.js";
+    // Diagnostic logs to confirm the script runs
+    console.log("BOOT: module loaded");
+    window.addEventListener("DOMContentLoaded", () => console.log("BOOT: DOM ready"));
 
-  // Local config + crypto helpers
-  import cfg from "./firebase-config.js";
-  import { deriveKeyFromPassphrase, encryptText, decryptText, bufToBase64, base64ToBuf } from "./app.js";
+    // Import Firebase SDK modules from the CDN
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-app.js";
+    import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut, updateProfile }
+      from "https://www.gstatic.com/firebasejs/9.23.0/firebase-auth.js";
+    import { getFirestore, collection, addDoc, onSnapshot, query, orderBy, serverTimestamp }
+      from "https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore.js";
 
-  const app = initializeApp(cfg);
-  const auth = getAuth(app);
-  const db = getFirestore(app);
+    // Import your local modules.  These files must live alongside index.html.
+    import cfg from "./firebase-config.js";
+    import { deriveKeyFromPassphrase, encryptText, decryptText, bufToBase64, base64ToBuf } from "./app.js";
 
-    // Elements
-    const el = (id) => document.getElementById(id);
-    const authPanel = el('authPanel');
-    const chatPanel = el('chatPanel');
-    const messagesEl = el('messages');
-    const composer = el('composer');
-    const msgInput = el('messageInput');
-    const signOutBtn = el('signOutBtn');
-    const whoami = el('whoami');
-    const copyInvite = el('copyInvite');
+    // Initialize Firebase with your config
+    const app = initializeApp(cfg);
+    const auth = getAuth(app);
+    const db = getFirestore(app);
+    console.log("BOOT: Firebase initialized", cfg.projectId);
 
-    // Room + key
-    let roomId = new URL(location.href).searchParams.get('room') || 'ahmed-xeo';
+    // Short helper for document.getElementById
+    const $ = (id) => document.getElementById(id);
+
+    const authPanel = $("authPanel");
+    const chatPanel = $("chatPanel");
+    const messagesEl = $("messages");
+    const msgInput = $("messageInput");
+    const composer = $("composer");
+    const whoami = $("whoami");
+    const copyInvite = $("copyInvite");
+    const signOutBtn = $("signOutBtn");
+
+    // Derive room ID from the URL (default to ahmed-xeo)
+    const roomId = new URL(location.href).searchParams.get("room") || "ahmed-xeo";
     let cryptoKey = null;
 
-    // Invite link
-    copyInvite?.addEventListener('click', async () => {
+    // Copy the invite link with the current room
+    copyInvite.addEventListener("click", async () => {
       const url = new URL(location.href);
-      url.searchParams.set('room', roomId);
+      url.searchParams.set("room", roomId);
       await navigator.clipboard.writeText(url.toString());
-      copyInvite.textContent = 'Copied';
-      setTimeout(() => (copyInvite.textContent = 'Copy invite link'), 1200);
+      copyInvite.textContent = "Copied";
+      setTimeout(() => (copyInvite.textContent = "Copy invite link"), 1200);
     });
 
-    // Sign in
-    el('authForm').addEventListener('submit', async (e) => {
+    // Handle sign in
+    $("authForm").addEventListener("submit", async (e) => {
       e.preventDefault();
-      const email = el('email').value.trim();
-      const password = el('password').value;
-      const displayName = el('displayName').value.trim();
-      const passphrase = el('passphrase').value;
-
+      console.log("HANDLER: submit fired");
+      const email = $("email").value.trim();
+      const password = $("password").value;
+      const displayName = $("displayName").value.trim();
+      const passphrase = $("passphrase").value;
       try {
         const cred = await signInWithEmailAndPassword(auth, email, password);
         if (!cred.user.displayName && displayName) {
@@ -116,60 +121,53 @@
         }
         cryptoKey = await deriveKeyFromPassphrase(passphrase, roomId);
       } catch (err) {
-        console.error(err);
-        alert('Sign-in failed: ' + (err.code || err.message));
+        console.error("AUTH ERROR:", err);
+        alert("Sign-in failed: " + (err.code || err.message));
       }
     });
 
-    signOutBtn.addEventListener('click', () => signOut(auth));
+    // Sign out
+    signOutBtn.addEventListener("click", () => signOut(auth));
 
-    // Render message
+    // Render a message bubble
     function renderMessage(doc, uid) {
       const data = doc.data();
-      const wrap = document.createElement('div');
-      wrap.className = 'bubbleRow';
-      if (data.senderUid === uid) wrap.classList.add('me');
-
-      const meta = document.createElement('div');
-      meta.className = 'meta';
+      const row = document.createElement("div");
+      row.className = "bubbleRow" + (data.senderUid === uid ? " me" : "");
+      const meta = document.createElement("div");
+      meta.className = "meta";
       const when = data.createdAt?.toDate?.() || new Date();
-      meta.textContent = `${data.senderName || 'Unknown'} • ${when.toLocaleString()}`;
-
-      const bubble = document.createElement('div');
-      bubble.className = 'bubble';
-
-      const body = document.createElement('div');
-      body.className = 'body';
-      if (!cryptoKey) {
-        body.textContent = '🔒 Encrypted — enter passphrase to view';
-      } else {
-        (async () => {
-          try {
-            const plaintext = await decryptText(cryptoKey, base64ToBuf(data.iv), base64ToBuf(data.ciphertext));
-            body.textContent = plaintext;
-          } catch {
-            body.textContent = '🔒 Decryption failed (wrong passphrase?)';
-          }
-        })();
-      }
-
+      meta.textContent = `${data.senderName || "Unknown"} • ${when.toLocaleString()}`;
+      const bubble = document.createElement("div");
+      bubble.className = "bubble";
+      const body = document.createElement("div");
+      body.className = "body";
+      (async () => {
+        try {
+          const text = cryptoKey
+            ? await decryptText(cryptoKey, base64ToBuf(data.iv), base64ToBuf(data.ciphertext))
+            : "🔒 Encrypted — enter passphrase to view";
+          body.textContent = text;
+        } catch {
+          body.textContent = "🔒 Decryption failed (wrong passphrase?)";
+        }
+      })();
       bubble.appendChild(body);
-      wrap.appendChild(meta);
-      wrap.appendChild(bubble);
-      return wrap;
+      row.append(meta, bubble);
+      return row;
     }
 
-    // Auth state → load messages
+    // Listen for auth state changes to toggle panels and load messages
     onAuthStateChanged(auth, (user) => {
+      console.log("AUTH state:", !!user);
       if (user) {
         authPanel.hidden = true;
         chatPanel.hidden = false;
         signOutBtn.hidden = false;
         whoami.textContent = `Signed in as: ${user.displayName || user.email}`;
-
-        const q = query(collection(db, 'rooms', roomId, 'messages'), orderBy('createdAt'));
+        const q = query(collection(db, "rooms", roomId, "messages"), orderBy("createdAt"));
         onSnapshot(q, (snap) => {
-          messagesEl.innerHTML = '';
+          messagesEl.innerHTML = "";
           snap.forEach((doc) => messagesEl.appendChild(renderMessage(doc, user.uid)));
           messagesEl.scrollTop = messagesEl.scrollHeight;
         });
@@ -177,32 +175,31 @@
         authPanel.hidden = false;
         chatPanel.hidden = true;
         signOutBtn.hidden = true;
-        whoami.textContent = '';
+        whoami.textContent = "";
       }
     });
 
-    // Send
-    composer.addEventListener('submit', async (e) => {
+    // Handle sending a message
+    composer.addEventListener("submit", async (e) => {
       e.preventDefault();
       const text = msgInput.value.trim();
       if (!text) return;
-      if (!cryptoKey) return alert('Enter the room passphrase first.');
+      if (!cryptoKey) return alert("Enter the room passphrase first.");
       const user = auth.currentUser;
-      if (!user) return alert('Not signed in');
-
+      if (!user) return alert("Not signed in");
       try {
         const { iv, ciphertext } = await encryptText(cryptoKey, text);
-        await addDoc(collection(db, 'rooms', roomId, 'messages'), {
+        await addDoc(collection(db, "rooms", roomId, "messages"), {
           senderUid: user.uid,
           senderName: user.displayName || user.email,
           iv: bufToBase64(iv),
           ciphertext: bufToBase64(ciphertext),
           createdAt: serverTimestamp(),
         });
-        msgInput.value = '';
+        msgInput.value = "";
       } catch (err) {
-        console.error(err);
-        alert('Send failed: ' + (err.code || err.message));
+        console.error("SEND ERROR:", err);
+        alert("Send failed: " + (err.code || err.message));
       }
     });
   </script>
