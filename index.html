@@ -1,60 +1,209 @@
 <!doctype html>
 <html lang="en">
 <head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Ahmed ⇄ Xeo — Private Chat</title>
-<link rel="stylesheet" href="styles.css" />
-<link rel="preconnect" href="https://www.gstatic.com" crossorigin>
-<link rel="preconnect" href="https://www.googleapis.com" crossorigin>
-<meta name="color-scheme" content="light dark">
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Ahmed ⇄ Xeo — Private Chat</title>
+  <link rel="stylesheet" href="styles.css" />
+  <meta name="color-scheme" content="light dark">
 </head>
 <body>
-<div id="app">
-<header class="topbar">
-<div class="brand">🕊️ Ahmed ⇄ Xeo</div>
-<button id="signOutBtn" class="ghost" hidden>Sign out</button>
-</header>
+  <div id="app">
+    <header class="topbar">
+      <div class="brand">🕊️ Ahmed ⇄ Xeo</div>
+      <button id="signOutBtn" class="ghost" hidden>Sign out</button>
+    </header>
 
+    <main class="shell">
+      <!-- Sign-in -->
+      <section id="authPanel" class="panel">
+        <h1>Sign in</h1>
+        <p class="muted">Only two accounts are allowed. Use your email + password.</p>
+        <form id="authForm" autocomplete="on">
+          <label>Email
+            <input type="email" id="email" required placeholder="you@example.com" />
+          </label>
+          <label>Password
+            <input type="password" id="password" required placeholder="••••••••" />
+          </label>
+          <label>Display name
+            <input type="text" id="displayName" required placeholder="Ahmed or Xeo" />
+          </label>
+          <label>Room passphrase <small class="muted">(for encryption)</small>
+            <input type="password" id="passphrase" required placeholder="shared secret" />
+          </label>
+          <button type="submit" class="primary">Sign in</button>
+        </form>
+      </section>
 
-<main class="shell">
-<!-- Sign‑in panel -->
-<section id="authPanel" class="panel">
-<h1>Sign in</h1>
-<p class="muted">Only two accounts are allowed. Use your email + password.</p>
-<form id="authForm" autocomplete="on">
-<label>Email
-<input type="email" id="email" required placeholder="you@example.com" />
-</label>
-<label>Password
-<input type="password" id="password" required placeholder="••••••••" />
-</label>
-<label>Display name
-<input type="text" id="displayName" required placeholder="Ahmed or Xeo" />
-</label>
-<label>Room passphrase <small class="muted">(for encryption)</small>
-<input type="password" id="passphrase" required placeholder="shared secret" />
-</label>
-<button type="submit" class="primary">Sign in</button>
-</form>
-<details class="muted">
-<summary>Why the passphrase?</summary>
-<p>Messages are end‑to‑end encrypted in your browser with this passphrase. The server only stores ciphertext.</p>
-</details>
-</section>
+      <!-- Chat -->
+      <section id="chatPanel" class="panel" hidden>
+        <div class="roomHead">
+          <div>
+            <div class="roomTitle">Private Room</div>
+            <div class="roomSub" id="whoami"></div>
+          </div>
+          <div class="roomActions">
+            <button id="copyInvite" class="ghost">Copy invite link</button>
+          </div>
+        </div>
+        <div id="messages" class="messages" aria-live="polite"></div>
+        <form id="composer" class="composer" autocomplete="off">
+          <input id="messageInput" type="text" required maxlength="2000" placeholder="Type a message…" />
+          <button id="sendBtn" class="primary" type="submit">Send</button>
+        </form>
+      </section>
+    </main>
 
+    <footer class="foot">
+      <small class="muted">E2EE via Web Crypto • Firestore sync • Static GitHub Pages</small>
+    </footer>
+  </div>
 
-<!-- Chat panel -->
-<section id="chatPanel" class="panel" hidden>
-<div class="roomHead">
-<div>
-<div class="roomTitle">Private Room</div>
-<div class="roomSub" id="whoami"></div>
-</div>
-<div class="roomActions">
-<button id="copyInvite" class="ghost">Copy invite link</button>
-</div>
-</div>
-<div id="messages" class="messages" aria-live="polite"></div>
-<form id="composer" class="composer" autocomplete="off">
+  <!-- App wiring (Firebase CDN + your local files) -->
+  <script type="module">
+    // Firebase (CDN v9 Modular)
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-app.js";
+    import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut, updateProfile } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-auth.js";
+    import { getFirestore, collection, addDoc, onSnapshot, query, orderBy, serverTimestamp } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore.js";
+
+    // Your local files (must exist next to index.html)
+    import cfg from "./firebase-config.js";
+    import { deriveKeyFromPassphrase, encryptText, decryptText, bufToBase64, base64ToBuf } from "./app.js";
+
+    // Boot Firebase
+    const app = initializeApp(cfg);
+    const auth = getAuth(app);
+    const db = getFirestore(app);
+
+    // Elements
+    const el = (id) => document.getElementById(id);
+    const authPanel = el('authPanel');
+    const chatPanel = el('chatPanel');
+    const messagesEl = el('messages');
+    const composer = el('composer');
+    const msgInput = el('messageInput');
+    const signOutBtn = el('signOutBtn');
+    const whoami = el('whoami');
+    const copyInvite = el('copyInvite');
+
+    // Room + key
+    let roomId = new URL(location.href).searchParams.get('room') || 'ahmed-xeo';
+    let cryptoKey = null;
+
+    // Invite link
+    copyInvite?.addEventListener('click', async () => {
+      const url = new URL(location.href);
+      url.searchParams.set('room', roomId);
+      await navigator.clipboard.writeText(url.toString());
+      copyInvite.textContent = 'Copied';
+      setTimeout(() => (copyInvite.textContent = 'Copy invite link'), 1200);
+    });
+
+    // Sign in
+    el('authForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const email = el('email').value.trim();
+      const password = el('password').value;
+      const displayName = el('displayName').value.trim();
+      const passphrase = el('passphrase').value;
+
+      try {
+        const cred = await signInWithEmailAndPassword(auth, email, password);
+        if (!cred.user.displayName && displayName) {
+          await updateProfile(cred.user, { displayName });
+        }
+        cryptoKey = await deriveKeyFromPassphrase(passphrase, roomId);
+      } catch (err) {
+        console.error(err);
+        alert('Sign-in failed: ' + (err.code || err.message));
+      }
+    });
+
+    signOutBtn.addEventListener('click', () => signOut(auth));
+
+    // Render message
+    function renderMessage(doc, uid) {
+      const data = doc.data();
+      const wrap = document.createElement('div');
+      wrap.className = 'bubbleRow';
+      if (data.senderUid === uid) wrap.classList.add('me');
+
+      const meta = document.createElement('div');
+      meta.className = 'meta';
+      const when = data.createdAt?.toDate?.() || new Date();
+      meta.textContent = `${data.senderName || 'Unknown'} • ${when.toLocaleString()}`;
+
+      const bubble = document.createElement('div');
+      bubble.className = 'bubble';
+
+      const body = document.createElement('div');
+      body.className = 'body';
+      if (!cryptoKey) {
+        body.textContent = '🔒 Encrypted — enter passphrase to view';
+      } else {
+        (async () => {
+          try {
+            const plaintext = await decryptText(cryptoKey, base64ToBuf(data.iv), base64ToBuf(data.ciphertext));
+            body.textContent = plaintext;
+          } catch {
+            body.textContent = '🔒 Decryption failed (wrong passphrase?)';
+          }
+        })();
+      }
+
+      bubble.appendChild(body);
+      wrap.appendChild(meta);
+      wrap.appendChild(bubble);
+      return wrap;
+    }
+
+    // Auth state → load messages
+    onAuthStateChanged(auth, (user) => {
+      if (user) {
+        authPanel.hidden = true;
+        chatPanel.hidden = false;
+        signOutBtn.hidden = false;
+        whoami.textContent = `Signed in as: ${user.displayName || user.email}`;
+
+        const q = query(collection(db, 'rooms', roomId, 'messages'), orderBy('createdAt'));
+        onSnapshot(q, (snap) => {
+          messagesEl.innerHTML = '';
+          snap.forEach((doc) => messagesEl.appendChild(renderMessage(doc, user.uid)));
+          messagesEl.scrollTop = messagesEl.scrollHeight;
+        });
+      } else {
+        authPanel.hidden = false;
+        chatPanel.hidden = true;
+        signOutBtn.hidden = true;
+        whoami.textContent = '';
+      }
+    });
+
+    // Send
+    composer.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const text = msgInput.value.trim();
+      if (!text) return;
+      if (!cryptoKey) return alert('Enter the room passphrase first.');
+      const user = auth.currentUser;
+      if (!user) return alert('Not signed in');
+
+      try {
+        const { iv, ciphertext } = await encryptText(cryptoKey, text);
+        await addDoc(collection(db, 'rooms', roomId, 'messages'), {
+          senderUid: user.uid,
+          senderName: user.displayName || user.email,
+          iv: bufToBase64(iv),
+          ciphertext: bufToBase64(ciphertext),
+          createdAt: serverTimestamp(),
+        });
+        msgInput.value = '';
+      } catch (err) {
+        console.error(err);
+        alert('Send failed: ' + (err.code || err.message));
+      }
+    });
+  </script>
+</body>
 </html>
